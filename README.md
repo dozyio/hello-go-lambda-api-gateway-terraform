@@ -1,7 +1,7 @@
-# hello-go-lambda-api-gateway-terraform
+# Hello Microservice - using AWS, Terraform and Vue.js
 
 Example hello microservice using a Go AWS Lambda, API Gateway with CORS and AWS Cognito for authentication - deployed using Terraform.
-Sample Vue.js SPA frontend using AWS amplify auth and api to consume the REST hello service. SPA configured via Terraform output
+Also includes a sample Vue.js SPA frontend using AWS amplify auth and api to consume the REST hello service. SPA configured via Terraform output.
 
 # Setup
 ```sh
