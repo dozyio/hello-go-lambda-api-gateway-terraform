@@ -55,11 +55,10 @@ resource "aws_api_gateway_resource" "resource" {
 }
 
 resource "aws_api_gateway_method" "method" {
-  rest_api_id   = aws_api_gateway_rest_api.api.id
-  resource_id   = aws_api_gateway_resource.resource.id
-  http_method   = "POST"
-  authorization = "AWS_IAM"
-  #authorization    = "NONE"
+  rest_api_id      = aws_api_gateway_rest_api.api.id
+  resource_id      = aws_api_gateway_resource.resource.id
+  http_method      = "POST"
+  authorization    = "AWS_IAM"
   api_key_required = "false"
   request_parameters = {
     "method.request.path.hello" = true
@@ -80,7 +79,11 @@ resource "aws_api_gateway_integration_response" "response" {
   resource_id = aws_api_gateway_resource.resource.id
   http_method = "POST"
   status_code = "200"
+  depends_on = [
+    aws_api_gateway_integration.integration
+  ]
 }
+
 ##API Gateway - Cors
 resource "aws_api_gateway_method" "options" {
   rest_api_id      = aws_api_gateway_rest_api.api.id
@@ -105,7 +108,9 @@ resource "aws_api_gateway_method_response" "options" {
   response_models = {
     "application/json" = "Empty"
   }
-  depends_on = [aws_api_gateway_method.options]
+  depends_on = [
+    aws_api_gateway_method.options
+  ]
 }
 
 resource "aws_api_gateway_integration" "options" {
@@ -116,7 +121,9 @@ resource "aws_api_gateway_integration" "options" {
   request_templates = {
     "application/json" = "{\"statusCode\": 200}"
   }
-  depends_on = [aws_api_gateway_method.options]
+  depends_on = [
+    aws_api_gateway_method.options
+  ]
 }
 resource "aws_api_gateway_integration_response" "options" {
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -129,7 +136,9 @@ resource "aws_api_gateway_integration_response" "options" {
     "method.response.header.Access-Control-Allow-Origin"  = "'*'"
   }
   #"method.response.header.Access-Control-Allow-Credentials" = "true"
-  depends_on = [aws_api_gateway_integration.options, aws_api_gateway_method_response.options]
+  depends_on = [
+    aws_api_gateway_integration.options
+  ]
 }
 ##API Gateway Lamda
 resource "aws_lambda_permission" "apigw_lambda" {
@@ -142,7 +151,6 @@ resource "aws_lambda_permission" "apigw_lambda" {
 
 ##API Gateway Deploy
 resource "aws_api_gateway_deployment" "hello_deploy" {
-  depends_on  = [aws_api_gateway_integration.integration]
   rest_api_id = aws_api_gateway_rest_api.api.id
   stage_name  = "v1"
   triggers = {
@@ -153,6 +161,9 @@ resource "aws_api_gateway_deployment" "hello_deploy" {
   lifecycle {
     create_before_destroy = true
   }
+  depends_on = [
+    aws_api_gateway_integration.integration
+  ]
 }
 
 #Cognito
@@ -183,15 +194,17 @@ resource "aws_cognito_user_pool" "hello" {
   }
   mfa_configuration        = "OFF"
   auto_verified_attributes = ["email"]
+  /*
   verification_message_template {
     default_email_option  = "CONFIRM_WITH_LINK"
     email_message_by_link = "Confirm your account {##Click Here##}"
     email_subject_by_link = "Welcome to Hello app"
   }
+  */
   email_configuration {
     email_sending_account = "COGNITO_DEFAULT"
   }
-  email_verification_subject = "Your verification code"
+  email_verification_subject = "Your Hello App verification code"
   email_verification_message = "Your verification code is {####}"
   sms_verification_message   = "Your verification code is {####}"
   device_configuration {
@@ -213,8 +226,8 @@ resource "aws_cognito_user_pool_client" "hello" {
   name                         = "hello-app-client"
   refresh_token_validity       = 30
   supported_identity_providers = ["COGNITO"]
-  callback_urls                = ["http://localhost:3000"]
-  logout_urls                  = ["http://localhost:3000"]
+  callback_urls                = ["http://localhost:8080"]
+  logout_urls                  = ["http://localhost:8080"]
 }
 
 resource "aws_cognito_identity_pool" "hello" {
@@ -236,7 +249,7 @@ resource "aws_cognito_identity_pool_roles_attachment" "hello" {
 }
 
 resource "aws_iam_role_policy" "api_gateway_access" {
-  name   = "api-gateway-acess"
+  name   = "api-gateway-access"
   role   = aws_iam_role.api_gateway_access.id
   policy = data.aws_iam_policy_document.api_gateway_access.json
 }
