@@ -1,15 +1,18 @@
 <template>
   <div id="app">
-    <amplify-authenticator username-alias="email">
-      <div>Response: {{ apiResponse }}</div>
-      <amplify-sign-out />
+    <amplify-authenticator username-alias="email" v-if="authState !== 'signedin'">
         <amplify-sign-up slot="sign-up" username-alias="email" :form-fields.prop="formFields" />
     </amplify-authenticator>
-
+    <div v-if="authState === 'signedin' && user">
+      <div>User: {{ user.username }}</div>
+      <div>API Response: {{ apiResponse }}</div>
+      <amplify-sign-out />
+    </div>
   </div>
 </template>
 
 <script>
+import { onAuthUIStateChange } from '@aws-amplify/ui-components'
 
 export default {
   name: 'App',
@@ -17,6 +20,8 @@ export default {
   },
   data() {
     return {
+      user: null,
+      authState: null,
       apiResponse: '',
       formFields: [
         {
@@ -32,18 +37,33 @@ export default {
       ]
     }
   },
-  mounted() {
-    const myInit = {
-      body: { name: "world" }
+  created() {
+    onAuthUIStateChange((authState, authData) => {
+      console.log('onAuthUIStateChange', authState, authData)
+      const previousAuthState = this.authState
+      this.authState = authState
+      this.user = authData
+      if(authState === 'signedin' && authData && previousAuthState != authState){
+        this.callApi()
+      }
+    })
+  },
+  beforeDestroy() {
+    return onAuthUIStateChange
+  },
+  methods: {
+    callApi(){
+      const myInit = {
+        body: { name: this.user.attributes.email }
+      }
+      this.$API.post('hello', '', myInit).
+        then(response => {
+          this.apiResponse = response.result
+        })
+        .catch(error => {
+          console.log("error", error.response)
+        })
     }
-    this.$API.post('hello', '', myInit).
-      then(response => {
-        console.log(response.result)
-        this.apiResponse = response.result
-      })
-      .catch(error => {
-        console.log("error", error.response)
-      })
   }
 }
 </script>
