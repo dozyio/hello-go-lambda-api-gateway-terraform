@@ -1,5 +1,10 @@
-.terraform
-*.tfstate
-*.backup
-*.zip
-main
+/terraform/.terraform
+/terraform/*.tfstate
+/terraform/*.backup
+
+/lambdas/**/*.zip
+/lambdas/**/main
+
+/spa/src/terraform-exports.js
+/spa/src/endpoints.js
+/spa/amplify

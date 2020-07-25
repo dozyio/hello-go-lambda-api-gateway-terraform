@@ -1,15 +1,35 @@
 # hello-go-lambda-api-gateway-terraform
 
-Example hello service using Go, AWS Lambda and API Gateway - deployed using terraform
+Example hello microservice using a Go AWS Lambda, API Gateway with CORS and AWS Cognito for authentication - deployed using Terraform.
+Sample Vue.js SPA frontend using AWS amplify auth and api to consume the REST hello service. SPA configured via Terraform output
 
 # Setup
-terraform init
+```sh
+cd terraform && terraform init
+```
 
 # Build
-make
+```sh
+make lamdas
+cd spa && npm install
+```
 
 # Deploy
+```sh
 make deploy
+make genconfig
+```
 
-# Usage
-{ "Name": "James" }
+# Run test SPA locally
+```sh
+cd spa && npm run serve
+```
+
+# Redeploy api gateway
+The api gateway sometimes needs redeploying (i.e. when changing auth or CORS settings). In this case you'll need to taint the terraform state with the following and redeploy.
+
+```sh
+make taint
+make deploy
+```
+
