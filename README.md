@@ -2,7 +2,7 @@
 
 Example hello microservice using Go AWS Lambdas, API Gateway with CORS and AWS Cognito for authentication - deployed using Terraform. Lambdas communicate via SQS
 
-Also includes a sample Vue.js SPA frontend using AWS amplify auth and amplofy api to consume the REST hello service. SPA configured via Terraform output.
+Also includes a sample Vue.js SPA frontend using AWS amplify auth and amplify api to consume the REST hello service. SPA configured via Terraform output.
 
 ![Terraform - AWS API Gateway, Cognito, Lambda & SQS](docs/terraform-aws-lambda-sqs.png)
 
