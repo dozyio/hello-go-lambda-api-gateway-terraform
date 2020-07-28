@@ -5,7 +5,8 @@
     </amplify-authenticator>
     <div v-if="authState === 'signedin' && user">
       <div>User: {{ user.username }}</div>
-      <div>API Response: {{ apiResponse }}</div>
+      <div v-if="!error">API - Response: {{ apiResponse }} SQS: {{ apiSQS }}</div>
+      <div v-if="error">Error - Status Code: {{ error.status }} Data: {{ error.data }}</div>
       <amplify-sign-out />
     </div>
   </div>
@@ -23,6 +24,8 @@ export default {
       user: null,
       authState: null,
       apiResponse: '',
+      apiSQS: '',
+      error: null,
       formFields: [
         {
           type: 'email',
@@ -59,8 +62,10 @@ export default {
       this.$API.post('hello', '', myInit).
         then(response => {
           this.apiResponse = response.result
+          this.apiSQS = response.sqs
         })
         .catch(error => {
+          this.error = error.response
           console.log("error", error.response)
         })
     }

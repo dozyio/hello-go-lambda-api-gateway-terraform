@@ -23,7 +23,7 @@ resource "aws_lambda_function" "hello" {
   filename                       = "${var.lambdaspath}/hello/hello.zip"
   handler                        = "main"
   source_code_hash               = filebase64sha256(data.archive_file.hello_zip.output_path)
-  role                           = aws_iam_role.iam_for_lambda.arn
+  role                           = aws_iam_role.iam_for_hello_lambda.arn
   runtime                        = "go1.x"
   memory_size                    = 128
   timeout                        = 10
@@ -41,15 +41,40 @@ resource "aws_lambda_function" "sqs_consumer" {
   filename                       = "${var.lambdaspath}/sqs-consumer/sqs-consumer.zip"
   handler                        = "main"
   source_code_hash               = filebase64sha256(data.archive_file.sqs_consumer_zip.output_path)
-  role                           = aws_iam_role.iam_for_lambda.arn
+  role                           = aws_iam_role.iam_for_sqs_consumer_lambda.arn
   runtime                        = "go1.x"
   memory_size                    = 128
   timeout                        = 10
   reserved_concurrent_executions = 5
 }
 
-resource "aws_iam_role" "iam_for_lambda" {
-  name               = "hello_lambda"
+resource "aws_iam_role" "iam_for_hello_lambda" {
+  name = "hello_lambda"
+  lifecycle {
+    create_before_destroy = true
+  }
+  assume_role_policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Action": "sts:AssumeRole",
+        "Principal": {
+          "Service": "lambda.amazonaws.com"
+        },
+        "Effect": "Allow",
+        "Sid": ""
+      }
+    ]
+}
+EOF
+}
+
+resource "aws_iam_role" "iam_for_sqs_consumer_lambda" {
+  name = "sqs_consumer_lambda"
+  lifecycle {
+    create_before_destroy = true
+  }
   assume_role_policy = <<EOF
 {
     "Version": "2012-10-17",
@@ -90,13 +115,33 @@ resource "aws_sqs_queue" "hello_queue" {
   receive_wait_time_seconds  = 10
 }
 
+resource "aws_iam_role_policy_attachment" "hello" {
+  policy_arn = aws_iam_policy.hello.arn
+  role       = aws_iam_role.iam_for_hello_lambda.name
+}
+
 resource "aws_iam_role_policy_attachment" "sqs_consumer" {
   policy_arn = aws_iam_policy.sqs_consumer.arn
-  role       = aws_iam_role.iam_for_lambda.name
+  role       = aws_iam_role.iam_for_sqs_consumer_lambda.name
+}
+
+resource "aws_iam_policy" "hello" {
+  policy = data.aws_iam_policy_document.hello.json
 }
 
 resource "aws_iam_policy" "sqs_consumer" {
   policy = data.aws_iam_policy_document.sqs_consumer.json
+}
+
+data "aws_iam_policy_document" "hello" {
+  statement {
+    sid       = "AllowSQSPermissions"
+    effect    = "Allow"
+    resources = ["arn:aws:sqs:*"]
+    actions = [
+      "sqs:SendMessage"
+    ]
+  }
 }
 
 data "aws_iam_policy_document" "sqs_consumer" {
@@ -129,7 +174,7 @@ data "aws_iam_policy_document" "sqs_consumer" {
     ]
   }
 
-  #don't allow creating log groups here so terraform can manage them independently
+  #don't create log groups here so terraform can manage them
   /*
   statement {
     sid       = "AllowCreatingLogGroups"
