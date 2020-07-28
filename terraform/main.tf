@@ -3,22 +3,49 @@ provider "aws" {
 }
 
 #Source
-data "archive_file" "zip" {
+data "archive_file" "hello_zip" {
   type        = "zip"
   source_file = "${var.lambdaspath}/hello/main"
   output_path = "${var.lambdaspath}/hello/hello.zip"
 }
 
+
+data "archive_file" "sqs_consumer_zip" {
+  type        = "zip"
+  source_file = "${var.lambdaspath}/sqs-consumer/main"
+  output_path = "${var.lambdaspath}/sqs-consumer/sqs-consumer.zip"
+}
+
+
 #Lambda
 resource "aws_lambda_function" "hello" {
-  function_name    = "hello"
-  filename         = "${var.lambdaspath}/hello/hello.zip"
-  handler          = "main"
-  source_code_hash = "data.archive_file.zip.output_base64sha256"
-  role             = aws_iam_role.iam_for_lambda.arn
-  runtime          = "go1.x"
-  memory_size      = 128
-  timeout          = 10
+  function_name                  = "hello"
+  filename                       = "${var.lambdaspath}/hello/hello.zip"
+  handler                        = "main"
+  source_code_hash               = filebase64sha256(data.archive_file.hello_zip.output_path)
+  role                           = aws_iam_role.iam_for_lambda.arn
+  runtime                        = "go1.x"
+  memory_size                    = 128
+  timeout                        = 10
+  reserved_concurrent_executions = 5
+  environment {
+    variables = {
+      "sqs_arn" = aws_sqs_queue.hello_queue.arn
+      "sqs_url" = aws_sqs_queue.hello_queue.id
+    }
+  }
+}
+
+resource "aws_lambda_function" "sqs_consumer" {
+  function_name                  = "sqs_consumer"
+  filename                       = "${var.lambdaspath}/sqs-consumer/sqs-consumer.zip"
+  handler                        = "main"
+  source_code_hash               = filebase64sha256(data.archive_file.sqs_consumer_zip.output_path)
+  role                           = aws_iam_role.iam_for_lambda.arn
+  runtime                        = "go1.x"
+  memory_size                    = 128
+  timeout                        = 10
+  reserved_concurrent_executions = 5
 }
 
 resource "aws_iam_role" "iam_for_lambda" {
@@ -38,6 +65,94 @@ resource "aws_iam_role" "iam_for_lambda" {
     ]
 }
 EOF
+}
+
+#Cloudwatch for lambdas
+resource "aws_cloudwatch_log_group" "sqs_consumer" {
+  name              = "/aws/lambda/${aws_lambda_function.sqs_consumer.function_name}"
+  retention_in_days = 7
+}
+/*
+resource "aws_cloudwatch_log_group" "hello" {
+  name              = "/aws/lambda/${aws_lambda_function.hello.function_name}"
+  retention_in_days = 7
+}
+*/
+
+#SQS
+resource "aws_sqs_queue" "hello_queue" {
+  name_prefix                = "hello_"
+  delay_seconds              = 0
+  visibility_timeout_seconds = 60
+  message_retention_seconds  = 86400
+  max_message_size           = 2048
+  fifo_queue                 = false
+  receive_wait_time_seconds  = 10
+}
+
+resource "aws_iam_role_policy_attachment" "sqs_consumer" {
+  policy_arn = aws_iam_policy.sqs_consumer.arn
+  role       = aws_iam_role.iam_for_lambda.name
+}
+
+resource "aws_iam_policy" "sqs_consumer" {
+  policy = data.aws_iam_policy_document.sqs_consumer.json
+}
+
+data "aws_iam_policy_document" "sqs_consumer" {
+  statement {
+    sid       = "AllowSQSPermissions"
+    effect    = "Allow"
+    resources = ["arn:aws:sqs:*"]
+    actions = [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:ReceiveMessage",
+    ]
+  }
+
+  statement {
+    sid       = "AllowInvokingLambdas"
+    effect    = "Allow"
+    resources = ["arn:aws:lambda:*:*:function:*"]
+    actions   = ["lambda:InvokeFunction"]
+  }
+
+  statement {
+    sid       = "AllowWritingLogs"
+    effect    = "Allow"
+    resources = ["arn:aws:logs:*:*:log-group:/aws/lambda/*:*"]
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+  }
+
+  #don't allow creating log groups here so terraform can manage them independently
+  /*
+  statement {
+    sid       = "AllowCreatingLogGroups"
+    effect    = "Allow"
+    resources = ["arn:aws:logs:*:*:*"]
+    actions   = ["logs:CreateLogGroup"]
+  }
+*/
+}
+
+resource "aws_lambda_permission" "allow_sqs_to_lambda" {
+  statement_id  = "AllowExecutionFromSQS"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.sqs_consumer.function_name
+  principal     = "sqs.amazonaws.com"
+  source_arn    = aws_sqs_queue.hello_queue.arn
+}
+
+resource "aws_lambda_event_source_mapping" "event_source_mapping" {
+  batch_size       = 1
+  event_source_arn = aws_sqs_queue.hello_queue.arn
+  enabled          = true
+  function_name    = aws_lambda_function.sqs_consumer.arn
 }
 
 #API Gateway
@@ -140,6 +255,7 @@ resource "aws_api_gateway_integration_response" "options" {
     aws_api_gateway_integration.options
   ]
 }
+
 ##API Gateway Lamda
 resource "aws_lambda_permission" "apigw_lambda" {
   statement_id  = "AllowExecutionFromAPIGateway"
@@ -165,6 +281,7 @@ resource "aws_api_gateway_deployment" "hello_deploy" {
     aws_api_gateway_integration.integration
   ]
 }
+
 
 #Cognito
 resource "aws_cognito_user_pool" "hello" {

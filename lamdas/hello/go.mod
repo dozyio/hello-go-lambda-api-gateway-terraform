@@ -1,4 +1,4 @@
-module image_to_s3
+module hello
 
 go 1.14
 
