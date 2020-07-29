@@ -30,10 +30,11 @@ resource "aws_lambda_function" "hello" {
   memory_size                    = 128
   timeout                        = 10
   reserved_concurrent_executions = 5
+  // vars for SQS come from SSM parameter store at runtime
+  // enable / disable SSM cache from environment vars
   environment {
     variables = {
-      "sqs_arn" = aws_sqs_queue.hello_queue.arn
-      "sqs_url" = aws_sqs_queue.hello_queue.id
+      "USE_SSM_CACHE" = "TRUE"
     }
   }
 }
@@ -99,12 +100,12 @@ resource "aws_cloudwatch_log_group" "sqs_consumer" {
   name              = "/aws/lambda/${aws_lambda_function.sqs_consumer.function_name}"
   retention_in_days = 7
 }
-/*
+
 resource "aws_cloudwatch_log_group" "hello" {
   name              = "/aws/lambda/${aws_lambda_function.hello.function_name}"
   retention_in_days = 7
 }
-*/
+
 
 #SQS
 resource "aws_sqs_queue" "hello_queue" {
@@ -142,6 +143,16 @@ data "aws_iam_policy_document" "hello" {
     resources = ["arn:aws:sqs:${var.region}:${data.aws_caller_identity.current.account_id}:*"]
     actions = [
       "sqs:SendMessage"
+    ]
+  }
+
+  statement {
+    sid       = "AllowWritingLogs"
+    effect    = "Allow"
+    resources = ["arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/*:*"]
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
     ]
   }
 }
@@ -498,6 +509,48 @@ data "aws_iam_policy_document" "deny_everything" {
 }
 
 
+#DynamoDB
+resource "aws_dynamodb_table" "hello" {
+  name           = "hello"
+  billing_mode   = "PROVISIONED"
+  read_capacity  = 5
+  write_capacity = 5
+  hash_key       = "pkey"
+  range_key      = "skey"
+
+  global_secondary_index {
+    name = "gsi1"
+    //swap hash & range key for secondary index
+    hash_key        = "skey"
+    range_key       = "pkey"
+    write_capacity  = 5
+    read_capacity   = 5
+    projection_type = "ALL"
+  }
+
+  stream_enabled   = false
+  stream_view_type = "NEW_IMAGE"
+
+  server_side_encryption {
+    enabled = false
+  }
+
+  point_in_time_recovery {
+    enabled = false
+  }
+
+  attribute {
+    name = "pkey"
+    type = "S"
+  }
+
+  attribute {
+    name = "skey"
+    type = "S"
+  }
+}
+
+
 #Systems Manager - parameter store
 resource "aws_ssm_parameter" "project_region" {
   name      = "project_region"
@@ -555,6 +608,20 @@ resource "aws_ssm_parameter" "sqs_url" {
   overwrite = true
 }
 
+resource "aws_ssm_parameter" "dynamodb_arn" {
+  name      = "dynamodb_arn"
+  type      = "String"
+  value     = aws_dynamodb_table.hello.arn
+  overwrite = true
+}
+
+resource "aws_ssm_parameter" "dynamodb_id" {
+  name      = "dynamodb_id"
+  type      = "String"
+  value     = aws_dynamodb_table.hello.id
+  overwrite = true
+}
+
 resource "aws_iam_role_policy_attachment" "hello_ssm" {
   policy_arn = aws_iam_policy.hello_ssm.arn
   role       = aws_iam_role.iam_for_hello_lambda.name
@@ -573,10 +640,11 @@ data "aws_iam_policy_document" "hello_ssm" {
   statement {
     sid       = "AllowSSMPermissions"
     effect    = "Allow"
-    resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:*"]
+    resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/*"]
     actions = [
-      "ssm:GetParametersByPath",
+      "ssm:GetParameter",
       "ssm:GetParameters",
+      "ssm:GetParametersByPath",
     ]
   }
 }
