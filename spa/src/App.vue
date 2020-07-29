@@ -23,8 +23,8 @@ export default {
     return {
       user: null,
       authState: null,
-      apiResponse: '',
-      apiSQS: '',
+      apiResponse: 'Waiting...',
+      apiSQS: 'Waiting...',
       error: null,
       formFields: [
         {

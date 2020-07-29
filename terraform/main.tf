@@ -2,6 +2,8 @@ provider "aws" {
   region = var.region
 }
 
+data "aws_caller_identity" "current" {}
+
 #Source
 data "archive_file" "hello_zip" {
   type        = "zip"
@@ -137,7 +139,7 @@ data "aws_iam_policy_document" "hello" {
   statement {
     sid       = "AllowSQSPermissions"
     effect    = "Allow"
-    resources = ["arn:aws:sqs:*"]
+    resources = ["arn:aws:sqs:${var.region}:${data.aws_caller_identity.current.account_id}:*"]
     actions = [
       "sqs:SendMessage"
     ]
@@ -148,7 +150,7 @@ data "aws_iam_policy_document" "sqs_consumer" {
   statement {
     sid       = "AllowSQSPermissions"
     effect    = "Allow"
-    resources = ["arn:aws:sqs:*"]
+    resources = ["arn:aws:sqs:${var.region}:${data.aws_caller_identity.current.account_id}:*"]
     actions = [
       "sqs:ChangeMessageVisibility",
       "sqs:DeleteMessage",
@@ -160,14 +162,14 @@ data "aws_iam_policy_document" "sqs_consumer" {
   statement {
     sid       = "AllowInvokingLambdas"
     effect    = "Allow"
-    resources = ["arn:aws:lambda:*:*:function:*"]
+    resources = ["arn:aws:lambda:${var.region}:${data.aws_caller_identity.current.account_id}:function:*"]
     actions   = ["lambda:InvokeFunction"]
   }
 
   statement {
     sid       = "AllowWritingLogs"
     effect    = "Allow"
-    resources = ["arn:aws:logs:*:*:log-group:/aws/lambda/*:*"]
+    resources = ["arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/*:*"]
     actions = [
       "logs:CreateLogStream",
       "logs:PutLogEvents"
@@ -449,7 +451,7 @@ data "aws_iam_policy_document" "api_gateway_access" {
       "execute-api:Invoke"
     ]
     effect    = "Allow"
-    resources = ["arn:aws:execute-api:*:*:*"]
+    resources = ["arn:aws:execute-api:${var.region}:${data.aws_caller_identity.current.account_id}:*"]
   }
 }
 
@@ -492,6 +494,90 @@ data "aws_iam_policy_document" "deny_everything" {
     actions   = ["*"]
     effect    = "Deny"
     resources = ["*"]
+  }
+}
+
+
+#Systems Manager - parameter store
+resource "aws_ssm_parameter" "project_region" {
+  name      = "project_region"
+  type      = "String"
+  value     = var.region
+  overwrite = true
+}
+
+resource "aws_ssm_parameter" "cognito_region" {
+  name      = "cognito_region"
+  type      = "String"
+  value     = var.region
+  overwrite = true
+}
+
+resource "aws_ssm_parameter" "user_pools_id" {
+  name      = "user_pools_id"
+  type      = "String"
+  value     = aws_cognito_user_pool.hello.id
+  overwrite = true
+}
+
+resource "aws_ssm_parameter" "user_pools_web_client_id" {
+  name      = "user_pools_web_client_id"
+  type      = "String"
+  value     = aws_cognito_user_pool_client.hello.id
+  overwrite = true
+}
+
+resource "aws_ssm_parameter" "cognito_identity_pool_id" {
+  name      = "cognito_identity_pool"
+  type      = "String"
+  value     = aws_cognito_identity_pool.hello.id
+  overwrite = true
+}
+
+resource "aws_ssm_parameter" "gateway_endpoint" {
+  name      = "gateway_endpoint"
+  type      = "String"
+  value     = "${aws_api_gateway_deployment.hello_deploy.invoke_url}${aws_api_gateway_resource.resource.path}"
+  overwrite = true
+}
+
+resource "aws_ssm_parameter" "sqs_arn" {
+  name      = "sqs_arn"
+  type      = "String"
+  value     = aws_sqs_queue.hello_queue.arn
+  overwrite = true
+}
+
+resource "aws_ssm_parameter" "sqs_url" {
+  name      = "sqs_url"
+  type      = "String"
+  value     = aws_sqs_queue.hello_queue.id
+  overwrite = true
+}
+
+resource "aws_iam_role_policy_attachment" "hello_ssm" {
+  policy_arn = aws_iam_policy.hello_ssm.arn
+  role       = aws_iam_role.iam_for_hello_lambda.name
+}
+
+resource "aws_iam_policy" "hello_ssm" {
+  policy = data.aws_iam_policy_document.hello_ssm.json
+}
+
+data "aws_iam_policy_document" "hello_ssm" {
+  statement {
+    sid       = "DescribeParameters"
+    actions   = ["ssm:DescribeParameters"]
+    resources = ["*"]
+  }
+  statement {
+    sid       = "AllowSSMPermissions"
+    effect    = "Allow"
+    resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:*"]
+    actions = [
+      "ssm:GetParametersByPath",
+      "ssm:GetParameters",
+    ]
   }
 }
 
