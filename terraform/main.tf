@@ -528,7 +528,7 @@ resource "aws_dynamodb_table" "hello" {
     projection_type = "ALL"
   }
 
-  stream_enabled   = false
+  stream_enabled   = true
   stream_view_type = "NEW_IMAGE"
 
   server_side_encryption {
@@ -619,6 +619,20 @@ resource "aws_ssm_parameter" "dynamodb_id" {
   name      = "dynamodb_id"
   type      = "String"
   value     = aws_dynamodb_table.hello.id
+  overwrite = true
+}
+
+resource "aws_ssm_parameter" "dynamodb_stream_arn" {
+  name      = "dynamodb_stream_arn"
+  type      = "String"
+  value     = aws_dynamodb_table.hello.stream_arn
+  overwrite = true
+}
+
+resource "aws_ssm_parameter" "dynamodb_stream_label" {
+  name      = "dynamodb_stream_label"
+  type      = "String"
+  value     = aws_dynamodb_table.hello.stream_label
   overwrite = true
 }
 
