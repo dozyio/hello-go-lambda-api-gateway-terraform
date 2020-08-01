@@ -18,7 +18,7 @@ make lamdas
 
 # Deploy
 ```sh
-make deploy
+make apply
 make spaconfig
 ```
 
@@ -33,7 +33,7 @@ The api gateway sometimes needs redeploying (i.e. when changing auth or CORS set
 
 ```sh
 make taint
-make deploy
+make apply
 make spaconfig
 ```
 

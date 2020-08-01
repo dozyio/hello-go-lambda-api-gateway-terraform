@@ -11,11 +11,16 @@ data "archive_file" "hello_zip" {
   output_path = "${var.lambdaspath}/hello/hello.zip"
 }
 
-
 data "archive_file" "sqs_consumer_zip" {
   type        = "zip"
   source_file = "${var.lambdaspath}/sqs-consumer/main"
   output_path = "${var.lambdaspath}/sqs-consumer/sqs-consumer.zip"
+}
+
+data "archive_file" "dlq_consumer_zip" {
+  type        = "zip"
+  source_file = "${var.lambdaspath}/dlq-consumer/main"
+  output_path = "${var.lambdaspath}/dlq-consumer/dlq-consumer.zip"
 }
 
 
@@ -34,7 +39,8 @@ resource "aws_lambda_function" "hello" {
   // enable / disable SSM cache from environment vars
   environment {
     variables = {
-      "USE_SSM_CACHE" = "TRUE"
+      "USE_SSM_CACHE"     = "TRUE"
+      "SSM_CACHE_TIMEOUT" = "300"
     }
   }
 }
@@ -49,6 +55,31 @@ resource "aws_lambda_function" "sqs_consumer" {
   memory_size                    = 128
   timeout                        = 10
   reserved_concurrent_executions = 5
+  environment {
+    variables = {
+      "USE_SSM_CACHE"     = "TRUE"
+      "SSM_CACHE_TIMEOUT" = "300"
+      "ALWAYS_ERROR"      = "FALSE" //for testing dead letter queue
+    }
+  }
+}
+
+resource "aws_lambda_function" "dlq_consumer" {
+  function_name                  = "dlq_consumer"
+  filename                       = "${var.lambdaspath}/dlq-consumer/dlq-consumer.zip"
+  handler                        = "main"
+  source_code_hash               = filebase64sha256(data.archive_file.dlq_consumer_zip.output_path)
+  role                           = aws_iam_role.iam_for_dlq_consumer_lambda.arn
+  runtime                        = "go1.x"
+  memory_size                    = 128
+  timeout                        = 10
+  reserved_concurrent_executions = 5
+  environment {
+    variables = {
+      "USE_SSM_CACHE"     = "TRUE"
+      "SSM_CACHE_TIMEOUT" = "300"
+    }
+  }
 }
 
 resource "aws_iam_role" "iam_for_hello_lambda" {
@@ -95,14 +126,41 @@ resource "aws_iam_role" "iam_for_sqs_consumer_lambda" {
 EOF
 }
 
+resource "aws_iam_role" "iam_for_dlq_consumer_lambda" {
+  name = "dlq_consumer_lambda"
+  lifecycle {
+    create_before_destroy = true
+  }
+  assume_role_policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Action": "sts:AssumeRole",
+        "Principal": {
+          "Service": "lambda.amazonaws.com"
+        },
+        "Effect": "Allow",
+        "Sid": ""
+      }
+    ]
+}
+EOF
+}
+
 #Cloudwatch for lambdas
+resource "aws_cloudwatch_log_group" "hello" {
+  name              = "/aws/lambda/${aws_lambda_function.hello.function_name}"
+  retention_in_days = 7
+}
+
 resource "aws_cloudwatch_log_group" "sqs_consumer" {
   name              = "/aws/lambda/${aws_lambda_function.sqs_consumer.function_name}"
   retention_in_days = 7
 }
 
-resource "aws_cloudwatch_log_group" "hello" {
-  name              = "/aws/lambda/${aws_lambda_function.hello.function_name}"
+resource "aws_cloudwatch_log_group" "dlq_consumer" {
+  name              = "/aws/lambda/${aws_lambda_function.dlq_consumer.function_name}"
   retention_in_days = 7
 }
 
@@ -113,6 +171,20 @@ resource "aws_sqs_queue" "hello_queue" {
   delay_seconds              = 0
   visibility_timeout_seconds = 60
   message_retention_seconds  = 86400
+  max_message_size           = 2048
+  fifo_queue                 = false
+  receive_wait_time_seconds  = 10
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.dlq.arn
+    maxReceiveCount     = 4
+  })
+}
+
+resource "aws_sqs_queue" "dlq" {
+  name_prefix                = "dlq_"
+  delay_seconds              = 0
+  visibility_timeout_seconds = 60
+  message_retention_seconds  = 345600 //4 days
   max_message_size           = 2048
   fifo_queue                 = false
   receive_wait_time_seconds  = 10
@@ -128,6 +200,11 @@ resource "aws_iam_role_policy_attachment" "sqs_consumer" {
   role       = aws_iam_role.iam_for_sqs_consumer_lambda.name
 }
 
+resource "aws_iam_role_policy_attachment" "dlq_consumer" {
+  policy_arn = aws_iam_policy.dlq_consumer.arn
+  role       = aws_iam_role.iam_for_dlq_consumer_lambda.name
+}
+
 resource "aws_iam_policy" "hello" {
   policy = data.aws_iam_policy_document.hello.json
 }
@@ -135,6 +212,11 @@ resource "aws_iam_policy" "hello" {
 resource "aws_iam_policy" "sqs_consumer" {
   policy = data.aws_iam_policy_document.sqs_consumer.json
 }
+
+resource "aws_iam_policy" "dlq_consumer" {
+  policy = data.aws_iam_policy_document.dlq_consumer.json
+}
+
 
 data "aws_iam_policy_document" "hello" {
   statement {
@@ -198,6 +280,30 @@ data "aws_iam_policy_document" "sqs_consumer" {
 */
 }
 
+data "aws_iam_policy_document" "dlq_consumer" {
+  statement {
+    sid       = "AllowSQSPermissions"
+    effect    = "Allow"
+    resources = ["arn:aws:sqs:${var.region}:${data.aws_caller_identity.current.account_id}:*"]
+    actions = [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:ReceiveMessage",
+    ]
+  }
+
+  statement {
+    sid       = "AllowWritingLogs"
+    effect    = "Allow"
+    resources = ["arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/*:*"]
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+  }
+}
+
 resource "aws_lambda_permission" "allow_sqs_to_lambda" {
   statement_id  = "AllowExecutionFromSQS"
   action        = "lambda:InvokeFunction"
@@ -212,6 +318,23 @@ resource "aws_lambda_event_source_mapping" "event_source_mapping" {
   enabled          = true
   function_name    = aws_lambda_function.sqs_consumer.arn
 }
+
+resource "aws_lambda_permission" "allow_dlq_to_lambda" {
+  statement_id  = "AllowExecutionFromSQS"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dlq_consumer.function_name
+  principal     = "sqs.amazonaws.com"
+  source_arn    = aws_sqs_queue.dlq.arn
+}
+
+resource "aws_lambda_event_source_mapping" "event_source_mapping_dlq_to_lambda" {
+  batch_size       = 1
+  event_source_arn = aws_sqs_queue.dlq.arn
+  enabled          = true
+  function_name    = aws_lambda_function.dlq_consumer.arn
+}
+
+
 
 #API Gateway
 resource "aws_api_gateway_rest_api" "api" {
@@ -528,8 +651,9 @@ resource "aws_dynamodb_table" "hello" {
     projection_type = "ALL"
   }
 
-  stream_enabled   = true
-  stream_view_type = "NEW_IMAGE"
+  stream_enabled = false
+  //stream_view_type = "NEW_IMAGE"
+  //stream_view_type = ""
 
   server_side_encryption {
     enabled = false
@@ -547,6 +671,73 @@ resource "aws_dynamodb_table" "hello" {
   attribute {
     name = "skey"
     type = "S"
+  }
+}
+
+
+resource "aws_iam_role_policy_attachment" "sqs_lambda_dynamodb" {
+  policy_arn = aws_iam_policy.sqs_lambda_dynamodb.arn
+  role       = aws_iam_role.iam_for_sqs_consumer_lambda.name
+}
+
+resource "aws_iam_policy" "sqs_lambda_dynamodb" {
+  policy = data.aws_iam_policy_document.sqs_lambda_dynamodb.json
+}
+
+data "aws_iam_policy_document" "sqs_lambda_dynamodb" {
+  statement {
+    sid    = "ListAndDescribe"
+    effect = "Allow"
+    actions = [
+      "dynamodb:List*",
+      "dynamodb:DescribeReservedCapacity*",
+      "dynamodb:DescribeLimits",
+      "dynamodb:DescribeTimeToLive",
+    ]
+    resources = ["*"]
+  }
+  statement {
+    sid       = "SpecificTable"
+    effect    = "Allow"
+    resources = ["arn:aws:dynamodb:${var.region}:${data.aws_caller_identity.current.account_id}:table/${aws_dynamodb_table.hello.name}"]
+    actions = [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeStream",
+      "dynamodb:DescribeTable",
+      "dynamodb:Get*",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ]
+  }
+}
+
+
+#SNS
+resource "aws_sns_topic" "dlq_topic" {
+  name = "dlq-topic"
+}
+
+resource "aws_iam_role_policy_attachment" "dlq_lambda" {
+  policy_arn = aws_iam_policy.dlq_lambda.arn
+  role       = aws_iam_role.iam_for_dlq_consumer_lambda.name
+}
+
+resource "aws_iam_policy" "dlq_lambda" {
+  policy = data.aws_iam_policy_document.dlq_lambda.json
+}
+
+data "aws_iam_policy_document" "dlq_lambda" {
+  statement {
+    sid    = "Publish"
+    effect = "Allow"
+    actions = [
+      "SNS:Publish",
+    ]
+    resources = [aws_sns_topic.dlq_topic.arn]
   }
 }
 
@@ -622,6 +813,21 @@ resource "aws_ssm_parameter" "dynamodb_id" {
   overwrite = true
 }
 
+resource "aws_ssm_parameter" "dynamodb_table_name" {
+  name      = "dynamodb_table_name"
+  type      = "String"
+  value     = aws_dynamodb_table.hello.name
+  overwrite = true
+}
+
+resource "aws_ssm_parameter" "dlq_topic_arn" {
+  name      = "dlq_topic_arn"
+  type      = "String"
+  value     = aws_sns_topic.dlq_topic.arn
+  overwrite = true
+}
+
+/*
 resource "aws_ssm_parameter" "dynamodb_stream_arn" {
   name      = "dynamodb_stream_arn"
   type      = "String"
@@ -635,17 +841,36 @@ resource "aws_ssm_parameter" "dynamodb_stream_label" {
   value     = aws_dynamodb_table.hello.stream_label
   overwrite = true
 }
+*/
 
 resource "aws_iam_role_policy_attachment" "hello_ssm" {
   policy_arn = aws_iam_policy.hello_ssm.arn
   role       = aws_iam_role.iam_for_hello_lambda.name
 }
 
-resource "aws_iam_policy" "hello_ssm" {
-  policy = data.aws_iam_policy_document.hello_ssm.json
+resource "aws_iam_role_policy_attachment" "sqs_consumer_ssm" {
+  policy_arn = aws_iam_policy.sqs_consumer_ssm.arn
+  role       = aws_iam_role.iam_for_sqs_consumer_lambda.name
 }
 
-data "aws_iam_policy_document" "hello_ssm" {
+resource "aws_iam_role_policy_attachment" "dlq_consumer_ssm" {
+  policy_arn = aws_iam_policy.dlq_consumer_ssm.arn
+  role       = aws_iam_role.iam_for_dlq_consumer_lambda.name
+}
+
+resource "aws_iam_policy" "hello_ssm" {
+  policy = data.aws_iam_policy_document.ssm_parameter_store.json
+}
+
+resource "aws_iam_policy" "sqs_consumer_ssm" {
+  policy = data.aws_iam_policy_document.ssm_parameter_store.json
+}
+
+resource "aws_iam_policy" "dlq_consumer_ssm" {
+  policy = data.aws_iam_policy_document.ssm_parameter_store.json
+}
+
+data "aws_iam_policy_document" "ssm_parameter_store" {
   statement {
     sid       = "DescribeParameters"
     actions   = ["ssm:DescribeParameters"]

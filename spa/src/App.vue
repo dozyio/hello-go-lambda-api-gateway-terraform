@@ -66,7 +66,7 @@ export default {
         })
         .catch(error => {
           this.error = error.response
-          console.log("error", error.response)
+          console.log("error", error, error.response)
         })
     }
   }

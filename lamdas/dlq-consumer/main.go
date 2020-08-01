@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -13,22 +12,12 @@ import (
 	runtime "github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
+	"github.com/aws/aws-sdk-go/service/sns"
 	"github.com/aws/aws-sdk-go/service/ssm"
 )
 
-//Item to hold sqs info for insert into dynamodb
-type Item struct {
-	Pkey        string `json:"pkey"`
-	Skey        string `json:"skey"`
-	MessageID   string `json:"messageId"`
-	EventSource string `json:"eventSource"`
-	Body        string `json:"body"`
-}
-
 //SQSBody json struct
-type SQSBody struct {
+type DLQBody struct {
 	Type  string `json:"type"`
 	Value string `json:"value"`
 }
@@ -42,8 +31,7 @@ type SSMParameterStoreCache struct {
 const cacheDefaultTimeout int64 = 60
 
 var (
-	useSSMCache    string           = "true"  //override via environment vars
-	alwaysError    string           = "false" //override via environment vars - for testing DLQ
+	useSSMCache    string           = "true" //override via environment vars
 	parameterStore                  = make(map[string]SSMParameterStoreCache)
 	cacheTimeout   int64            = cacheDefaultTimeout
 	sess           *session.Session = nil
@@ -52,6 +40,14 @@ var (
 func getParameterStoreValue(param string) (*ssm.GetParameterOutput, error) {
 	if val, ok := os.LookupEnv("USE_SSM_CACHE"); ok {
 		useSSMCache = val
+	}
+
+	if val, ok := os.LookupEnv("SSM_CACHE_TIMEOUT"); ok {
+		if timeout, err := strconv.ParseInt(val, 10, 64); err == nil {
+			if timeout >= 0 {
+				cacheTimeout = timeout
+			}
+		}
 	}
 
 	if useSSMCache == "true" || useSSMCache == "TRUE" {
@@ -70,7 +66,6 @@ func getParameterStoreValue(param string) (*ssm.GetParameterOutput, error) {
 			},
 		}))
 	}
-
 	ssmService := ssm.New(sess)
 
 	paramOutput, err := ssmService.GetParameter(&ssm.GetParameterInput{
@@ -81,14 +76,6 @@ func getParameterStoreValue(param string) (*ssm.GetParameterOutput, error) {
 	}
 
 	if useSSMCache == "true" || useSSMCache == "TRUE" {
-		if val, ok := os.LookupEnv("SSM_CACHE_TIMEOUT"); ok {
-			if timeout, err := strconv.ParseInt(val, 10, 64); err == nil {
-				if timeout >= 0 {
-					cacheTimeout = timeout
-				}
-			}
-		}
-
 		fmt.Printf("Param: %s - not cached\n", param)
 		t := time.Now()
 		cacheExpires := t.Unix() + cacheTimeout
@@ -102,68 +89,44 @@ func getParameterStoreValue(param string) (*ssm.GetParameterOutput, error) {
 }
 
 func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
-	if val, ok := os.LookupEnv("ALWAYS_ERROR"); ok {
-		alwaysError = val
-	}
-
-	if alwaysError == "true" || useSSMCache == "TRUE" {
-		return errors.New("ALWAYS_ERROR = true")
-	}
-
-	if sess == nil {
-		sess = session.Must(session.NewSessionWithOptions(session.Options{
-			Config: aws.Config{
-				Region: aws.String(os.Getenv("AWS_REGION")),
-			},
-		}))
-	}
-
-	dynamodbService := dynamodb.New(sess)
-
-	tableName, err := getParameterStoreValue("dynamodb_table_name")
-	if err != nil {
-		return err
-	}
 
 	for _, message := range sqsEvent.Records {
 
 		fmt.Printf("[%s %s] Message = %s\n", message.MessageId, message.EventSource, message.Body)
 
-		body := &SQSBody{}
+		body := &DLQBody{}
 
 		err := json.Unmarshal([]byte(message.Body), body)
 		if err != nil {
 			return err
 		}
 
-		dt := time.Now()
-		item := Item{
-			Pkey:        body.Type + "#" + body.Value,
-			Skey:        dt.Format(time.RFC3339Nano),
-			MessageID:   message.MessageId,
-			EventSource: message.EventSource,
-			Body:        message.Body,
-		}
-
-		av, err := dynamodbattribute.MarshalMap(item)
-		if err != nil {
-			fmt.Printf("Error marshaling")
-			fmt.Printf(err.Error())
-			return err
-		}
-
-		fmt.Printf("%v", av)
-
-		input := &dynamodb.PutItemInput{
-			Item:      av,
-			TableName: tableName.Parameter.Value,
-		}
-
-		output, err := dynamodbService.PutItem(input)
+		dlqTopicArn, err := getParameterStoreValue("dlq_topic_arn")
 		if err != nil {
 			return err
 		}
-		fmt.Println(output)
+
+		if sess == nil {
+			sess = session.Must(session.NewSessionWithOptions(session.Options{
+				Config: aws.Config{
+					Region: aws.String(os.Getenv("AWS_REGION")),
+				},
+			}))
+		}
+
+		snsService := sns.New(sess)
+		params := &sns.PublishInput{
+			Message:  aws.String("DLQ notification"),
+			TopicArn: dlqTopicArn.Parameter.Value,
+		}
+
+		res, err := snsService.Publish(params)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println(res)
+
 	}
 	return nil
 }

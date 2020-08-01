@@ -1,10 +1,11 @@
 lambdas:
 	cd ./lamdas/hello/ && rm -rf ./main && GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ./main
 	cd ./lamdas/sqs-consumer/ && rm -rf ./main && GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ./main
+	cd ./lamdas/dlq-consumer/ && rm -rf ./main && GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ./main
 
 plan:
 	cd ./terraform && terraform plan
-deploy:
+apply:
 	cd ./terraform && terraform apply
 
 destroy:
