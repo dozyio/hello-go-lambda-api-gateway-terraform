@@ -4,7 +4,7 @@ Example hello microservice using Go AWS Lambdas, API Gateway with CORS and AWS C
 
 Also includes a sample Vue.js SPA frontend using AWS amplify auth and amplify api to consume the REST hello service. SPA configured via Terraform output.
 
-![Terraform - AWS API Gateway, Cognito, Lambda, SQS, SNS, DynamoDB](docs/erraform-aws-lambda-apigateway-cognito-sqs-dynamodb-sns-ssm.png)
+![Terraform - AWS API Gateway, Cognito, Lambda, SQS, SNS, DynamoDB](docs/terraform-aws-lambda-apigateway-cognito-sqs-dynamodb-sns-ssm.png)
 
 
 Hello Lambda - protected by API gateway, returns CORS header. Invoked with a POST with json { "name": "dozy" }
