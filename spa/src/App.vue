@@ -6,7 +6,7 @@
     <div v-if="authState === 'signedin' && user">
       <div>User: {{ user.username }}</div>
       <div v-if="!error">API - Response: {{ apiResponse }} SQS: {{ apiSQS }}</div>
-      <div v-if="error">Error - Status Code: {{ error.status }} Data: {{ error.data }}</div>
+      <div v-if="error">{{ error }}</div>
       <amplify-sign-out />
     </div>
   </div>
@@ -65,8 +65,8 @@ export default {
           this.apiSQS = response.sqs
         })
         .catch(error => {
-          this.error = error.response
-          console.log("error", error, error.response)
+          this.error = error
+          console.log("error: ", error)
         })
     }
   }

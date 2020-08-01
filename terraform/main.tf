@@ -43,6 +43,9 @@ resource "aws_lambda_function" "hello" {
       "SSM_CACHE_TIMEOUT" = "300"
     }
   }
+  dead_letter_config {
+    target_arn = aws_sns_topic.dlq_topic.arn
+  }
 }
 
 resource "aws_lambda_function" "sqs_consumer" {
@@ -722,15 +725,15 @@ resource "aws_sns_topic" "dlq_topic" {
 }
 
 resource "aws_iam_role_policy_attachment" "dlq_lambda" {
-  policy_arn = aws_iam_policy.dlq_lambda.arn
+  policy_arn = aws_iam_policy.dlq.arn
   role       = aws_iam_role.iam_for_dlq_consumer_lambda.name
 }
 
-resource "aws_iam_policy" "dlq_lambda" {
-  policy = data.aws_iam_policy_document.dlq_lambda.json
+resource "aws_iam_policy" "dlq" {
+  policy = data.aws_iam_policy_document.dlq.json
 }
 
-data "aws_iam_policy_document" "dlq_lambda" {
+data "aws_iam_policy_document" "dlq" {
   statement {
     sid    = "Publish"
     effect = "Allow"

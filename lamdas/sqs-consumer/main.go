@@ -106,7 +106,7 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 		alwaysError = val
 	}
 
-	if alwaysError == "true" || useSSMCache == "TRUE" {
+	if alwaysError == "true" || alwaysError == "TRUE" {
 		return errors.New("ALWAYS_ERROR = true")
 	}
 
