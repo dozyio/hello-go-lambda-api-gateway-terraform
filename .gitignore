@@ -9,4 +9,6 @@
 /spa/src/endpoints.js
 /spa/amplify
 
+.DS_Store
+/docs/.DS_Store
 TODO.md
