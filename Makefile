@@ -1,7 +1,7 @@
 lambdas:
-	cd ./lamdas/hello/ && rm -rf ./main && GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ./main
-	cd ./lamdas/sqs-consumer/ && rm -rf ./main && GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ./main
-	cd ./lamdas/dlq-consumer/ && rm -rf ./main && GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ./main
+	cd ./lambdas/hello/ && GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ./main
+	cd ./lambdas/sqs-consumer/ && GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ./main
+	cd ./lambdas/dlq-consumer/ && GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ./main
 
 plan:
 	cd ./terraform && terraform plan
@@ -17,3 +17,5 @@ spaconfig:
 
 taint:
 	cd ./terraform && terraform taint aws_api_gateway_deployment.hello_deploy
+
+.PHONY: lambdas plan apply destroy spaconfig taint

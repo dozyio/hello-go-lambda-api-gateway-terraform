@@ -56,10 +56,10 @@ export default {
   },
   methods: {
     callApi(){
-      const myInit = {
+      const body = {
         body: { name: this.user.attributes.email }
       }
-      this.$API.post('hello', '', myInit).
+      this.$API.post('hello', '', body).
         then(response => {
           this.apiResponse = response.result
           this.apiSQS = response.sqs
@@ -68,7 +68,7 @@ export default {
           this.error = error
           console.log("error: ", error)
         })
-    }
+    },
   }
 }
 </script>

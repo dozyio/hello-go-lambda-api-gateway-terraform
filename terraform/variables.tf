@@ -1,7 +1,11 @@
 variable region {
-  default = "eu-west-2"
+  description = "AWS region"
+  type        = string
+  default     = "eu-west-2"
 }
 
 variable lambdaspath {
-  default = "../lamdas/"
+  description = "Relative path to lamdas"
+  type        = string
+  default     = "../lambdas/"
 }
